@@ -6,42 +6,41 @@ const { Matrix } = require('ml-matrix');
 async function trainModel() {
     const features = [];
     const labels = [];
+    const maxRows = 100;  // Limite de 100 linhas para amostra
 
-    // Ler o arquivo CSV de forma assíncrona
+    // Ler o arquivo CSV com limite de linhas
     await new Promise((resolve, reject) => {
-        fs.createReadStream('microsoft.csv')  // Substitua pelo seu arquivo CSV real
+        let rowCount = 0;  // Contador de linhas lidas
+        let lastClose = null;  // Para armazenar o preço de fechamento do dia anterior
+
+        fs.createReadStream('GoogleData.csv')  // Substitua pelo seu arquivo CSV real
             .pipe(csv())
             .on('data', (row) => {
-                // Verifique os dados lidos para garantir que são válidos
-                console.log('Linha lida:', row);  // Adiciona este log para depuração
+                if (rowCount >= maxRows) return;
 
-                // Certifique-se de que as colunas estão presentes e com valores válidos
                 const adjClose = parseFloat(row.Adj_Close);
                 const close = parseFloat(row.Close);
-                const volume = parseInt(row.Volume);
 
-                // Verifique se os valores são válidos
-                if (!isNaN(adjClose) && !isNaN(close) && !isNaN(volume)) {
-                    features.push([adjClose, close]);
-                    labels.push(volume);
-                } else {
-                    console.warn(`Dados inválidos na linha: ${JSON.stringify(row)}`);
+                if (!isNaN(adjClose) && !isNaN(close) && lastClose !== null) {
+                    // Definir o rótulo: se o preço de fechamento de hoje for maior que o de ontem, é 1 (subiu), caso contrário, 0 (desceu)
+                    const label = close > lastClose ? 1 : 0;
+                    features.push([adjClose, close]);  // Usar adjClose e close como características
+                    labels.push(label);  // Rótulo binário de "subiu" ou "desceu"
                 }
+
+                lastClose = close;  // Atualiza o preço de fechamento do último dia
+                rowCount++;
             })
             .on('end', () => {
-                resolve();
+                resolve();  // Resolve a promise quando terminar a leitura
             })
-            .on('error', reject);
+            .on('error', reject);  // Se ocorrer erro, rejeita a promise
     });
 
     console.log('Dados de treinamento lidos com sucesso.');
 
     // Normalizar os dados
     normalizeData(features);
-
-    // Verifique os dados antes de treinar
-    console.log('Features normalizadas:', features);
-    console.log('Labels:', labels);
 
     // Dividir os dados em conjunto de treino e teste
     const trainSize = Math.floor(features.length * 0.8);  // 80% treino, 20% teste
@@ -65,36 +64,36 @@ async function trainModel() {
     const predictions = logistic.predict(X_test);
 
     // Exibir as previsões e rótulos verdadeiros
-    console.log('Previsões:', predictions);
-    console.log('Rótulos verdadeiros:', Y_test.to1DArray());
+    console.log('Previsões (0 = desceu, 1 = subiu):', predictions);
+    console.log('Rótulos verdadeiros (0 = desceu, 1 = subiu):', Y_test.to1DArray());
 
     // Calcular e exibir a acurácia
     const accuracy = calculateAccuracy(predictions, Y_test.to1DArray());
     console.log('Acurácia do modelo:', accuracy);
+
+    // Exibir mensagens baseadas nas previsões
+    predictions.forEach((prediction, index) => {
+        if (prediction === 0) {
+            console.log(`Previsão ${index + 1}: Não é adequado investir nesta ação. A ação está em queda.`);
+        } else {
+            console.log(`Previsão ${index + 1}: Excelente! A ação está em alta, pode ser um bom momento para investir.`);
+        }
+    });
 }
 
-// Função para calcular a acurácia baseada em uma margem de erro de 5%
+// Função para calcular a acurácia
 function calculateAccuracy(predictions, trueLabels) {
     let correctCount = 0;
-    const threshold = 0.05; // Definimos uma margem de 5% de erro
-
     for (let i = 0; i < predictions.length; i++) {
-        const predictedValue = predictions[i];
-        const actualValue = trueLabels[i];
-
-        // Verifica se a previsão está dentro de 5% do valor real
-        if (Math.abs(predictedValue - actualValue) / actualValue <= threshold) {
+        if (predictions[i] === trueLabels[i]) {
             correctCount++;
         }
     }
-
-    // Acurácia é o número de previsões corretas dividido pelo total de previsões
     return (correctCount / predictions.length) * 100;
 }
 
+// Função para normalizar os dados (Z-score)
 function normalizeData(features) {
-    // Normalização Z-score: (x - média) / desvio padrão
-
     const meanAdjClose = features.reduce((acc, val) => acc + val[0], 0) / features.length;
     const meanClose = features.reduce((acc, val) => acc + val[1], 0) / features.length;
 
